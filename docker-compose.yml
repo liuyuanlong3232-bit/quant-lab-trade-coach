@@ -6,6 +6,13 @@ services:
     env_file: [.env]
     environment:
       QUANT_LAB_DATA_DIR: /var/lib/quant-lab
+      QQBOT_APP_ID_FILE: /run/secrets/qqbot_app_id
+      QQBOT_APP_SECRET_FILE: /run/secrets/qqbot_app_secret
+      QQBOT_OPENID_FILE: /run/secrets/qqbot_openid
+    secrets:
+      - qqbot_app_id
+      - qqbot_app_secret
+      - qqbot_openid
     ports:
       # Deliberately loopback-only. Expose to Tailscale only through a
       # separately reviewed `tailscale serve` rule on the host.
@@ -29,3 +36,10 @@ services:
 volumes:
   quant_lab_data:
   quant_lab_logs:
+secrets:
+  qqbot_app_id:
+    file: ${QQBOT_APP_ID_HOST_FILE:-./.secrets/qqbot_app_id}
+  qqbot_app_secret:
+    file: ${QQBOT_APP_SECRET_HOST_FILE:-./.secrets/qqbot_app_secret}
+  qqbot_openid:
+    file: ${QQBOT_OPENID_HOST_FILE:-./.secrets/qqbot_openid}

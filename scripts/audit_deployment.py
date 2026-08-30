@@ -15,7 +15,7 @@ for path in ROOT.rglob("*"):
     except (OSError, UnicodeDecodeError):
         continue
 text = "\n".join(parts)
-required = ["127.0.0.1:${QUANT_LAB_PORT:-8080}:8080", "read_only: true", "cap_drop: [ALL]", "healthcheck:", "quant_lab_data:", "quant_lab_logs:", "tailscale", "--project-root \"${QUANT_LAB_DATA_DIR}\"", "/run/nginx:size=1m", "/var/cache/nginx:size=8m", "kill -0 \"$api_pid\"", "kill -0 \"$nginx_pid\""]
+required = ["127.0.0.1:${QUANT_LAB_PORT:-8080}:8080", "read_only: true", "cap_drop: [ALL]", "healthcheck:", "quant_lab_data:", "quant_lab_logs:", "tailscale", "--project-root \"${QUANT_LAB_DATA_DIR}\"", "/run/nginx:size=1m", "/var/cache/nginx:size=8m", "kill -0 \"$api_pid\"", "kill -0 \"$nginx_pid\"", "proxy_read_timeout 180s", "read_only: true", "QQBOT_APP_SECRET_FILE", "QUANT_LAB_VPS_FACT_HOST_PATH", "target: /var/lib/quant-lab/vps-facts"]
 for marker in required:
     if marker not in text:
         raise SystemExit(f"DEPLOYMENT_GATE_FAIL missing: {marker}")

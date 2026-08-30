@@ -129,6 +129,29 @@ class WindowsCredentialBackend:
     def delete(self) -> None:
         if os.name=="nt": self._api().CredDeleteW(self.target,1,0)
 
+class DockerSecretCredentialBackend:
+    """Read-only Docker secrets; values never enter settings/API responses."""
+    managed = True
+    def __init__(self) -> None:
+        self.secret_file = os.environ.get("QQBOT_APP_SECRET_FILE", "").strip()
+        self.app_id_file = os.environ.get("QQBOT_APP_ID_FILE", "").strip()
+        self.openid_file = os.environ.get("QQBOT_OPENID_FILE", "").strip()
+    def _read_file(self, name: str) -> str | None:
+        if not name: return None
+        try:
+            path = Path(name)
+            if not path.is_file() or (os.name != "nt" and path.stat().st_mode & 0o077): return None
+            value = path.read_text(encoding="utf-8").strip()
+            return value or None
+        except (OSError, UnicodeError): return None
+    def read(self) -> str | None: return self._read_file(self.secret_file)
+    def app_id(self) -> str | None: return self._read_file(self.app_id_file)
+    def openid(self) -> str | None: return self._read_file(self.openid_file)
+    def secure_store_status(self) -> tuple[str, str]:
+        return ("READY", "DOCKER_SECRETS_READ_ONLY") if self.read() else ("UNAVAILABLE_CURRENT_LOGON_SESSION", "QQBOT_SECRET_FILE_MISSING_OR_INSECURE")
+    def write(self, secret: str) -> None: raise PermissionError("QQBOT_SECRETS_MANAGED_BY_DEPLOYMENT")
+    def delete(self) -> None: raise PermissionError("QQBOT_SECRETS_MANAGED_BY_DEPLOYMENT")
+
 def _qqbot_paths(root: Path) -> tuple[Path, Path]:
     return root / "data" / "trade_coach" / "secrets" / "settings.json", Path(QQBOT_SECRET_TARGET)
 
@@ -2531,7 +2554,7 @@ class TradeCoachService:
     def __init__(self, db_path: str | Path, *, project_root: str | Path | None = None, vps_path: str | Path | None = None, bootstrap: bool = True, mentor_provider: MentorProvider | None = None, evidence_verifier: PublicEvidenceVerifier | None = None, notification_service: NotificationService | None = None, credential_backend: Any | None = None):
         self.store = TradeCoachStore(db_path)
         self.project_root = local_path(project_root or Path(db_path).resolve().parents[1])
-        self.credential_backend = credential_backend or WindowsCredentialBackend()
+        self.credential_backend = credential_backend or (DockerSecretCredentialBackend() if os.environ.get("QQBOT_APP_SECRET_FILE") else WindowsCredentialBackend())
         self._qqbot_binding_lock = threading.Lock()
         self.collector = RealMarketCollector(self.store, project_root=self.project_root)
         self.vps_path = vps_path
@@ -2810,7 +2833,7 @@ class TradeCoachService:
     def _qqbot_status(self) -> dict[str, Any]:
         settings_path, _ = _qqbot_paths(self.project_root)
         data = json.loads(settings_path.read_text(encoding="utf-8")) if settings_path.exists() else {}
-        app_id = str(data.get("app_id") or "").strip()
+        app_id = str(getattr(self.credential_backend, "app_id", lambda: None)() or data.get("app_id") or "").strip()
         status_fn = getattr(self.credential_backend, "secure_store_status", None)
         secure_status, reason = status_fn() if status_fn else ("READY", "")
         bound = bool(str(data.get("openid") or "").strip())
@@ -2824,14 +2847,16 @@ class TradeCoachService:
                 "openid_bound": bound, "binding_state": "BOUND" if bound else ("WAITING_BINDING" if app_id else "NOT_CONFIGURED"),
                 "gateway_status": gateway_state,
                 "connection_error": getattr(gateway, "error", None),
-                "secure_store_status": secure_status, "secure_store_reason": reason}
+                "secure_store_status": secure_status, "secure_store_reason": reason,
+                "deployment_managed": bool(getattr(self.credential_backend, "managed", False))}
 
     def _configure_qqbot_gateway(self) -> None:
         """Create a gateway only when both credentials are available."""
         settings_path, _ = _qqbot_paths(self.project_root)
         try: cfg = json.loads(settings_path.read_text(encoding="utf-8")) if settings_path.exists() else {}
         except (OSError, ValueError, json.JSONDecodeError): cfg = {}
-        app_id, secret = str(cfg.get("app_id") or "").strip(), str(self.credential_backend.read() or "").strip()
+        app_id = str(getattr(self.credential_backend, "app_id", lambda: None)() or cfg.get("app_id") or "").strip()
+        secret = str(self.credential_backend.read() or "").strip()
         if app_id and secret:
             self.qqbot_gateway = QQBotGateway(self, transport=QQBotGatewayTransport(app_id, secret))
         else:
@@ -2886,6 +2911,8 @@ class TradeCoachService:
         return self._qqbot_status()
 
     def _save_qqbot(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if getattr(self.credential_backend, "managed", False):
+            raise PermissionError("QQBOT_SECRETS_MANAGED_BY_DEPLOYMENT")
         settings_path, _ = _qqbot_paths(self.project_root)
         existing = json.loads(settings_path.read_text(encoding="utf-8")) if settings_path.exists() else {}
         secret = str(payload.get("app_secret") or "").strip(); app_id = str(payload.get("app_id") or "").strip() or str(existing.get("app_id") or "").strip()

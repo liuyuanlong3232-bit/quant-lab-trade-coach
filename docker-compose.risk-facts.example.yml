@@ -1,0 +1,7 @@
+services:
+  quant-lab:
+    volumes:
+      - type: bind
+        source: ${QUANT_LAB_VPS_FACT_HOST_PATH}
+        target: /var/lib/quant-lab/vps-facts
+        read_only: true
