@@ -2403,6 +2403,31 @@ def _round_lot(value: float, *, minimum: int = 0) -> int:
     return max(minimum, int(math.floor(max(0.0, value) / 100.0) * 100))
 
 
+def _capacity_band(capacity: int | None, current_shares: int, *, width: int) -> list[int] | None:
+    """Return a lot-sized target band anchored to account capacity.
+
+    The previous implementation used ``current_shares`` as both sides of the
+    band in RANGE (and as the lower bound in TREND_UP), which made a non-zero
+    account permanently evaluate to HOLD.  Capacity is now the policy anchor;
+    an existing holding is never reduced below one lot by an ordinary regime.
+    """
+    if capacity is None:
+        return None
+    holding_floor = 100 if current_shares > 0 else 0
+    high = max(holding_floor, capacity)
+    low = max(holding_floor, high - width)
+    return [low, high]
+
+
+def _action_for_band(current_shares: int, band: list[int]) -> str:
+    low, high = band
+    if current_shares < low:
+        return "ADD_IN_STEPS"
+    if current_shares > high:
+        return "REDUCE_IN_STEPS"
+    return "HOLD"
+
+
 def _mentor_chain(regime: Mapping[str, Any], stock: Mapping[str, Any], risk: Mapping[str, Any], previous: Mapping[str, Any] | None) -> list[dict[str, str]]:
     chain = [
         {"step": "事实", "title": "先看证据", "text": f"当前大环境为{regime.get('label')}；可用因子 {len(regime.get('available_symbols', []))} 个，缺失 {len(regime.get('missing_symbols', []))} 个。", "reasoning_kind": "DETERMINISTIC_RULES"},
@@ -2445,22 +2470,33 @@ def build_advice(store: TradeCoachStore, regime: Mapping[str, Any], stock: Mappi
             if investable_assets is not None:
                 investable_assets = max(0.0, investable_assets - planned_cash_out)
             capacity = _round_lot(investable_assets * 0.65 / price) if price and investable_assets is not None else None
-            low = _round_lot(max(current_shares * 0.75, 100))
-            high = max(low, _round_lot(max(current_shares, capacity or current_shares)))
-            share_range = [low, high]
-            action = "HOLD" if low <= current_shares <= high else ("ADD_IN_STEPS" if current_shares < low else "REDUCE_IN_STEPS")
-            trigger = ["白银、申万有色与个股继续站上20日趋势", "若回撤后商品和板块重新同步，可按100股分批"]
+            band = _capacity_band(capacity, current_shares, width=100)
+            if band is None:
+                action = "WAIT"
+                trigger = ["先确认总资产、计划取现和有效价格，再计算趋势仓位容量"]
+            else:
+                share_range = band
+                action = _action_for_band(current_shares, band)
+                trigger = ["白银、申万有色与个股继续站上20日趋势", "相对65%资金容量不足时，人工按100股分批补足；超过容量时分批降低"]
             invalidation = ["DXY与实际利率同步上行且板块跌破20日趋势", "个股公告或交易状态出现重大风险"]
         elif regime.get("code") == "RANGE":
-            low = _round_lot(max(0, current_shares - 200))
-            high = _round_lot(current_shares)
-            share_range = [low, high]
-            action = "HOLD" if low <= current_shares <= high else ("ADD_IN_STEPS" if current_shares < low else "REDUCE_IN_STEPS")
-            trigger = ["反弹但白银未恢复", "801050继续弱于20日趋势时，每次100股减仓"]
+            investable_assets = _finite(confirmed.get("total_assets"))
+            planned_cash_out = _finite(confirmed.get("planned_cash_out")) or 0.0
+            if investable_assets is not None:
+                investable_assets = max(0.0, investable_assets - planned_cash_out)
+            capacity = _round_lot(investable_assets * 0.65 / price) if price and investable_assets is not None else None
+            band = _capacity_band(capacity, current_shares, width=200)
+            if band is None:
+                action = "WAIT"
+                trigger = ["先确认总资产、计划取现和有效价格，再计算震荡仓位区间"]
+            else:
+                share_range = band
+                action = _action_for_band(current_shares, band)
+                trigger = ["区间内等待支撑和反弹确认，不凭单日波动猜底", "低于震荡容量时按100股分批补，高于容量或板块转弱时按100股分批减"]
             invalidation = ["白银与板块重新同步转强", "个股重新强于商品和板块"]
         elif regime.get("code") == "DOWN":
-            low = _round_lot(current_shares * 0.33)
-            high = _round_lot(current_shares * 0.67)
+            low = _round_lot(max(current_shares * 0.33, 100))
+            high = _round_lot(max(current_shares * 0.67, low))
             share_range = [low, max(low, high)]
             action = "REDUCE_IN_STEPS" if current_shares > high else "HOLD"
             trigger = ["明确下跌趋势延续时分批减仓，不以普通下跌作为清仓理由"]

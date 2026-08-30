@@ -66,6 +66,19 @@ class TradeCoachTests(unittest.TestCase):
             stamp = start + timedelta(days=index)
             store.append_observation(MarketObservation(symbol, "test-real-source", stamp, stamp, value, value * 1.01, value * 0.99, value, 1000, value, "READY", source_ref="test-fixture", raw_hash=f"{symbol}-{index}"))
 
+    def advice_for_position(self, shares, regime_code, *, total_assets=50000.0, planned_cash_out=5000.0):
+        with tempfile.TemporaryDirectory() as directory:
+            store = TradeCoachStore(Path(directory) / "coach.sqlite3")
+            self.add_series(store, "000426.XSHE", datetime(2026, 7, 1, tzinfo=CN_TZ), 0.01)
+            store.append_account_snapshot(
+                status="CONFIRMED", shares=shares, avg_cost=34.751, available_cash=10000.0,
+                total_assets=total_assets, planned_cash_out=planned_cash_out,
+                source="USER_EXPLICIT_CONFIRMATION", note="position-band-test",
+            )
+            regime = {"code": regime_code, "label": regime_code, "evidence_status": "COMPLETE", "available_symbols": [], "missing_symbols": []}
+            stock = {"code": "SYNC", "label": "与商品和板块同步", "evidence_status": "COMPLETE"}
+            return build_advice(store, regime, stock, risk_assessment(load_vps_facts(None)))
+
     def test_candidate_is_not_current_until_explicit_confirmation(self):
         store = self.make_store()
         account = store.account()
@@ -163,6 +176,40 @@ class TradeCoachTests(unittest.TestCase):
         self.assertTrue(advice["manual_confirmation_required"])
         self.assertFalse(advice["automatic_trading"])
         self.assertNotEqual(advice["action"], "EXIT_MAJOR_RISK")
+
+    def test_trend_up_position_band_emits_add_hold_and_reduce(self):
+        add = self.advice_for_position(500, "TREND_UP")
+        self.assertEqual(add["action"], "ADD_IN_STEPS")
+        self.assertEqual(add["recommended_share_range"][1] % 100, 0)
+
+        capacity = add["recommended_share_range"][1]
+        hold = self.advice_for_position(capacity, "TREND_UP")
+        self.assertEqual(hold["action"], "HOLD")
+
+        reduce = self.advice_for_position(3000, "TREND_UP")
+        self.assertEqual(reduce["action"], "REDUCE_IN_STEPS")
+        for advice in (add, hold, reduce):
+            self.assertTrue(advice["manual_confirmation_required"])
+            self.assertFalse(advice["automatic_trading"])
+
+    def test_range_position_band_emits_add_hold_and_reduce(self):
+        add = self.advice_for_position(300, "RANGE")
+        self.assertEqual(add["action"], "ADD_IN_STEPS")
+        capacity = add["recommended_share_range"][1]
+        hold = self.advice_for_position(capacity, "RANGE")
+        self.assertEqual(hold["action"], "HOLD")
+        reduce = self.advice_for_position(3000, "RANGE")
+        self.assertEqual(reduce["action"], "REDUCE_IN_STEPS")
+
+    def test_planned_cash_out_reduces_position_capacity(self):
+        without_withdrawal = self.advice_for_position(500, "TREND_UP", planned_cash_out=0.0)
+        with_withdrawal = self.advice_for_position(500, "TREND_UP", planned_cash_out=20000.0)
+        self.assertLess(with_withdrawal["recommended_share_range"][1], without_withdrawal["recommended_share_range"][1])
+
+    def test_down_mode_keeps_one_lot_as_ordinary_floor(self):
+        advice = self.advice_for_position(100, "DOWN")
+        self.assertEqual(advice["recommended_share_range"], [100, 100])
+        self.assertEqual(advice["action"], "HOLD")
 
     def test_down_regime_does_not_implicitly_clear(self):
         store = self.make_store()
