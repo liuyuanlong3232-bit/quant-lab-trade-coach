@@ -13,9 +13,11 @@ services:
     volumes:
       - quant_lab_data:/var/lib/quant-lab
       - quant_lab_logs:/var/log/quant-lab
-    read_only: true
     tmpfs:
       - /tmp:size=64m,noexec,nosuid,nodev
+      - /run/nginx:size=1m,noexec,nosuid,nodev
+      - /var/cache/nginx:size=8m,noexec,nosuid,nodev
+    read_only: true
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     healthcheck:
