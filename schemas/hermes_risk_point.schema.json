@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Quant-Lab Hermes risk point v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["as_of_trade_date", "generated_at", "valid_until", "risk_level", "source", "model_version", "reason_codes"],
+  "properties": {
+    "as_of_trade_date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "generated_at": {"type": "string", "description": "ISO-8601 timestamp with an explicit timezone"},
+    "valid_until": {"type": "string", "description": "ISO-8601 timestamp with an explicit timezone"},
+    "risk_level": {"enum": ["GREEN", "ORANGE", "RED"]},
+    "source": {"const": "HERMES"},
+    "model_version": {"const": "hermes_risk_v1"},
+    "reason_codes": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  }
+}

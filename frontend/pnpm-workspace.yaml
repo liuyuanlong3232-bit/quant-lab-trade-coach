@@ -1,0 +1,13 @@
+allowBuilds:
+  # Vite needs esbuild's platform binary at runtime.  It is the only build
+  # script explicitly allowed in this small local workspace; all other
+  # dependency build scripts remain blocked by default.
+  esbuild: true
+
+# pnpm 11 reads install-layout and run-verification settings from the
+# workspace manifest (not from a committed .npmrc).  Keep the generated tree
+# stable on Windows and never launch an implicit reinstall before one-shot
+# commands.
+nodeLinker: hoisted
+verifyDepsBeforeRun: false
+scriptsPrependNodePath: true
