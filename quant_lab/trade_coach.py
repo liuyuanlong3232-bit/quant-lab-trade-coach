@@ -39,6 +39,7 @@ from pathlib import Path
 from statistics import mean, pstdev
 from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 try:
     import aiohttp
@@ -55,6 +56,55 @@ AI_SCHEMA_VERSION = "quant_lab_ai_mentor_v1"
 AI_PROVIDER_NAME = "multi_provider"
 AI_PROVIDER_ORDER = ("deepseek", "mimo")
 NOTIFICATION_SCHEMA_VERSION = "quant_lab_notification_v1"
+US_CENTRAL = ZoneInfo("America/Chicago")
+
+
+def _us_federal_holidays(year: int) -> set[date]:
+    """Observed US federal holidays used by daily FRED release schedules."""
+    holidays: set[date] = set()
+    # Include next year's New Year because a Saturday January 1 is observed on
+    # Friday December 31 of the preceding calendar year.
+    for holiday_year in (year, year + 1):
+        for month, day in ((1, 1), (6, 19), (7, 4), (11, 11), (12, 25)):
+            actual = date(holiday_year, month, day)
+            observed = actual + timedelta(days=-1 if actual.weekday() == 5 else 1 if actual.weekday() == 6 else 0)
+            if observed.year == year:
+                holidays.add(observed)
+    # MLK, Washington's Birthday, Labor Day, Columbus Day and Thanksgiving.
+    for month, weekday, ordinal in ((1, 0, 3), (2, 0, 3), (9, 0, 1), (10, 0, 2), (11, 3, 4)):
+        first = date(year, month, 1)
+        holidays.add(first + timedelta(days=(weekday - first.weekday()) % 7 + 7 * (ordinal - 1)))
+    # Memorial Day is the last Monday in May.
+    last = date(year, 5, 31)
+    holidays.add(last - timedelta(days=(last.weekday() - 0) % 7))
+    return holidays
+
+
+def _us_business_day(day: date) -> bool:
+    return day.weekday() < 5 and day not in _us_federal_holidays(day.year)
+
+
+def _next_us_business_day(day: date) -> date:
+    candidate = day + timedelta(days=1)
+    while not _us_business_day(candidate):
+        candidate += timedelta(days=1)
+    return candidate
+
+
+def _fred_metadata_dt(value: Any, *, end_of_day: bool = False) -> datetime | None:
+    """Parse provider metadata; naive timestamps are rejected (no guessing TZ)."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            return datetime.combine(date.fromisoformat(text), datetime.min.time() if not end_of_day else datetime.max.time(), tzinfo=US_CENTRAL).astimezone(UTC)
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return None
+        return parsed.astimezone(UTC)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 QQBOT_SECRET_TARGET = "QuantLab/PersonalTradeCoach/QQBot/AppSecret/v1"
 
@@ -1943,6 +1993,8 @@ class RealMarketCollector:
             meta = files.get(spec.provider_symbol)
             if not isinstance(meta, Mapping):
                 continue
+            fred_updated_at = meta.get("updated_at", manifest.get("updated_at"))
+            fred_next_release = meta.get("next_release", manifest.get("next_release"))
             relative = str(meta.get("path") or f"fred_{spec.provider_symbol}.csv")
             path = (root / relative).resolve()
             try:
@@ -1959,7 +2011,7 @@ class RealMarketCollector:
                     close = _finite(row.get(spec.provider_symbol) or row.get("value"))
                     if stamp is None or close is None:
                         continue
-                    item = MarketObservation(spec.symbol, "FRED", fetched_at, stamp, None, None, None, close, None, close, "READY", source_ref=f"{source_ref}#local_sha256={actual_hash}", raw_hash=canonical_hash({"path": str(path), "date": day, "close": close, "sha256": actual_hash}), timestamp_precision="date", mapping_version="fred_local_cache_v1", contract_mapping={"source": "FRED", "fetched_at": iso(fetched_at), "sha256": actual_hash})
+                    item = MarketObservation(spec.symbol, "FRED", fetched_at, stamp, None, None, None, close, None, close, "READY", source_ref=f"{source_ref}#local_sha256={actual_hash}", raw_hash=canonical_hash({"path": str(path), "date": day, "close": close, "sha256": actual_hash}), timestamp_precision="date", mapping_version="fred_local_cache_v1", contract_mapping={"source": "FRED", "fetched_at": iso(fetched_at), "sha256": actual_hash, "fred_updated_at": fred_updated_at, "fred_next_release": fred_next_release})
                     observations.append(item)
             except (OSError, ValueError, TypeError, csv.Error):
                 continue
@@ -2263,25 +2315,83 @@ def trend_metric(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     return {"status": "READY", "direction": direction, "return_20d": ret, "volatility": volatility, "sample_size": len(values), "last": window[-1], "ma20": average, "reason_codes": []}
 
 
-def _fresh_status(row: Mapping[str, Any] | None, *, now: datetime, max_hours: int) -> str:
+def _fred_fresh_status(row: Mapping[str, Any], *, now: datetime) -> tuple[str, list[str]]:
+    """Evaluate daily FRED evidence against US business-day release windows.
+
+    FRED observations are dates, not intraday quotes.  A Friday value therefore
+    remains current through the weekend and until the next US business-day
+    publication window closes.  Provider metadata wins when present; otherwise
+    the explicit conservative fallback is used.
+    """
+    exchange = _parse_dt(row.get("exchange_time"))
+    if exchange is None:
+        return "MISSING", ["FRED_OBSERVATION_DATE_MISSING"]
+    metadata = json_load(row.get("contract_mapping"), {})
+    if not isinstance(metadata, Mapping):
+        metadata = {}
+    updated_raw = metadata.get("fred_updated_at") or metadata.get("updated_at")
+    release_raw = metadata.get("fred_next_release") or metadata.get("next_release")
+    updated = _fred_metadata_dt(updated_raw)
+    release = _fred_metadata_dt(release_raw, end_of_day=True)
+    if updated_raw and updated is None or release_raw and release is None:
+        return "MISSING", ["FRED_METADATA_TIMEZONE_INVALID"]
+    if release is not None:
+        if updated is not None and updated > now:
+            return "MISSING", ["FRED_METADATA_UPDATED_IN_FUTURE"]
+        if now <= release:
+            return "READY", ["FRED_OFFICIAL_RELEASE_WINDOW_OPEN"]
+        return "STALE", ["FRED_OFFICIAL_RELEASE_WINDOW_MISSED"]
+    # No official release metadata: next US business day at 18:00 CT is a
+    # deliberately conservative deadline, never a guessed calendar date.
+    # ``exchange_time`` for FRED is a date anchored at midnight in the app's
+    # timezone; do not convert it across midnight and accidentally move the
+    # observation to the prior US calendar day.
+    raw_day = str(row.get("exchange_time") or "")[:10]
+    try:
+        observation_day = date.fromisoformat(raw_day)
+    except ValueError:
+        observation_day = exchange.date()
+    release_day = _next_us_business_day(observation_day)
+    fallback_deadline = datetime.combine(release_day, datetime.min.time().replace(hour=18), tzinfo=US_CENTRAL).astimezone(UTC)
+    fetched = _fred_metadata_dt(metadata.get("fetched_at"))
+    if fetched is not None and exchange <= fetched <= now:
+        fetched_central = fetched.astimezone(US_CENTRAL)
+        fetched_day = fetched_central.date()
+        if _us_business_day(fetched_day) and fetched_central.hour < 18:
+            poll_release_day = fetched_day
+        else:
+            poll_release_day = _next_us_business_day(fetched_day)
+        poll_deadline = datetime.combine(poll_release_day, datetime.min.time().replace(hour=18), tzinfo=US_CENTRAL).astimezone(UTC)
+        if poll_deadline > fallback_deadline:
+            fallback_deadline = poll_deadline
+            if now <= fallback_deadline:
+                return "READY", ["FRED_PROVIDER_POLL_FALLBACK"]
+    if now <= fallback_deadline:
+        return "READY", ["FRED_BUSINESS_DAY_FALLBACK"]
+    return "STALE", ["FRED_RELEASE_WINDOW_OVERDUE_FALLBACK"]
+
+
+def _fresh_status(row: Mapping[str, Any] | None, *, now: datetime, max_hours: int) -> tuple[str, list[str]]:
     if row is None or _finite(row.get("close")) is None:
-        return "MISSING"
+        return "MISSING", []
     if str(row.get("status")) not in {"READY", "STALE"}:
-        return str(row.get("status") or "UNKNOWN")
+        return str(row.get("status") or "UNKNOWN"), []
+    if str(row.get("source")) == "FRED":
+        return _fred_fresh_status(row, now=now)
     stamp = _parse_dt(row.get("exchange_time") or row.get("observed_at"))
     if stamp is None:
-        return "MISSING"
+        return "MISSING", []
     age = (now - stamp).total_seconds() / 3600
     if age > max_hours:
-        return "STALE"
-    return "READY"
+        return "STALE", []
+    return "READY", []
 
 
 def _source_public(row: Mapping[str, Any] | None, *, spec: InstrumentSpec, now: datetime) -> dict[str, Any]:
-    status = _fresh_status(row, now=now, max_hours=spec.freshness_hours)
+    status, freshness_reasons = _fresh_status(row, now=now, max_hours=spec.freshness_hours)
     if row is None:
         return {"source": None, "status": "MISSING", "close": None, "exchange_time": None, "observed_at": None, "latency_ms": None, "reason_codes": ["NO_SOURCE_EVIDENCE"], "source_ref": None}
-    return {"source": row.get("source"), "status": status, "close": row.get("close"), "exchange_time": row.get("exchange_time"), "observed_at": row.get("observed_at"), "latency_ms": row.get("latency_ms"), "reason_codes": json_load(row.get("reason_codes"), []), "source_ref": row.get("source_ref"), "mapping_version": row.get("mapping_version"), "contract_mapping": json_load(row.get("contract_mapping"), {})}
+    return {"source": row.get("source"), "status": status, "close": row.get("close"), "exchange_time": row.get("exchange_time"), "observed_at": row.get("observed_at"), "latency_ms": row.get("latency_ms"), "reason_codes": list(dict.fromkeys((*json_load(row.get("reason_codes"), []), *freshness_reasons))), "source_ref": row.get("source_ref"), "mapping_version": row.get("mapping_version"), "contract_mapping": json_load(row.get("contract_mapping"), {})}
 
 
 def build_instrument_states(store: TradeCoachStore, *, now: datetime | None = None) -> list[dict[str, Any]]:
@@ -2331,8 +2441,16 @@ def build_instrument_states(store: TradeCoachStore, *, now: datetime | None = No
             reconciliation = "PARTIAL"
             selected_status = "READY" if selected["status"] == "READY" else "STALE"
         elif usable:
-            reconciliation = "STALE"
-            selected_status = "STALE"
+            # A failed live FRED probe does not invalidate a previously
+            # verified daily observation before its release window expires.
+            # Keep the failed probe visible, but let the schedule-aware cache
+            # remain READY. Other providers retain the strict stale fallback.
+            if spec.source == "FRED" and selected["status"] == "READY":
+                reconciliation = "PARTIAL"
+                selected_status = "READY"
+            else:
+                reconciliation = "STALE"
+                selected_status = "STALE"
         else:
             reconciliation = "MISSING"
             selected_status = selected["status"]
