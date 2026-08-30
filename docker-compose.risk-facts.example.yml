@@ -3,5 +3,7 @@ services:
     volumes:
       - type: bind
         source: ${QUANT_LAB_VPS_FACT_HOST_PATH}
-        target: /var/lib/quant-lab/vps-facts
+        target: /var/lib/quant-lab/vps-facts/vps_macro_risk_points.jsonl
         read_only: true
+    environment:
+      QUANT_LAB_VPS_FACT_PATH: /var/lib/quant-lab/vps-facts/vps_macro_risk_points.jsonl

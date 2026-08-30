@@ -140,7 +140,8 @@ class DockerSecretCredentialBackend:
         if not name: return None
         try:
             path = Path(name)
-            if not path.is_file() or (os.name != "nt" and path.stat().st_mode & 0o077): return None
+            if not path.is_file() or path.stat().st_size > 4096: return None
+            if os.name != "nt" and path.stat().st_mode & 0o022: return None
             value = path.read_text(encoding="utf-8").strip()
             return value or None
         except (OSError, UnicodeError): return None
@@ -2565,9 +2566,14 @@ class TradeCoachService:
         self.evidence_verifier = evidence_verifier or PublicEvidenceVerifier()
         self.notifications = notification_service or NotificationService(self.store)
         settings_path, _ = _qqbot_paths(self.project_root)
-        if bootstrap and settings_path.exists():
+        if bootstrap:
             try:
-                cfg = json.loads(settings_path.read_text(encoding="utf-8")); secret = self.credential_backend.read()
+                cfg = json.loads(settings_path.read_text(encoding="utf-8")) if settings_path.exists() else {}
+                secret = self.credential_backend.read()
+                managed_app = getattr(self.credential_backend, "app_id", lambda: None)()
+                managed_openid = getattr(self.credential_backend, "openid", lambda: None)()
+                if managed_app: cfg["app_id"] = managed_app
+                if managed_openid: cfg["openid"] = managed_openid
                 if cfg.get("app_id") and secret:
                     self.notifications.adapter = QQBotNotificationAdapter(app_id=str(cfg["app_id"]), app_secret=secret, openid=str(cfg.get("openid") or ""))
             except (OSError, ValueError, json.JSONDecodeError):
@@ -2836,7 +2842,8 @@ class TradeCoachService:
         app_id = str(getattr(self.credential_backend, "app_id", lambda: None)() or data.get("app_id") or "").strip()
         status_fn = getattr(self.credential_backend, "secure_store_status", None)
         secure_status, reason = status_fn() if status_fn else ("READY", "")
-        bound = bool(str(data.get("openid") or "").strip())
+        managed_openid = getattr(self.credential_backend, "openid", lambda: None)()
+        bound = bool(str(managed_openid or data.get("openid") or "").strip())
         adapter_status = self.notifications.adapter.status()
         gateway = self.qqbot_gateway
         gateway_state = (getattr(getattr(gateway, "transport", None), "status", None)
@@ -2874,6 +2881,8 @@ class TradeCoachService:
     def bind_qqbot_openid(self, openid: str) -> dict[str, Any]:
         """Atomically accept the first C2C OpenID; never overwrite a binding."""
         value = str(openid or "").strip()
+        if getattr(self.credential_backend, "managed", False):
+            raise PermissionError("QQBOT_OPENID_MANAGED_BY_DEPLOYMENT")
         if not value or len(value) > 256 or any(ord(c) < 0x20 for c in value):
             raise ValueError("QQBOT_OPENID_INVALID")
         settings_path, _ = _qqbot_paths(self.project_root)
@@ -2896,6 +2905,8 @@ class TradeCoachService:
         return self._qqbot_status()
 
     def clear_qqbot_binding(self) -> dict[str, Any]:
+        if getattr(self.credential_backend, "managed", False):
+            raise PermissionError("QQBOT_OPENID_MANAGED_BY_DEPLOYMENT")
         settings_path, _ = _qqbot_paths(self.project_root)
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         with self._qqbot_binding_lock:

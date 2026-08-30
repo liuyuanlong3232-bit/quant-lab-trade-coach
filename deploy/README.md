@@ -23,8 +23,10 @@
 - 升级：固定镜像 digest，先备份，再 `docker compose up -d --no-deps quant-lab`；升级失败立即切回上一个 digest 并回读健康状态。不要使用 `latest`。
 - 回滚：保留上一镜像和上一份 `.env`；回滚不删除数据 volume。任何数据迁移必须先复制到新 volume 并人工验收。
 
-## QQ secrets 与风险事实（可选）
+## QQ secrets 与风险事实
 
 将 `deploy/.env.example` 复制为未提交的 `.env`，并在宿主机创建三个仅 owner 可读（Linux `chmod 600`）的文件：`qqbot_app_id`、`qqbot_app_secret`、`qqbot_openid`。Compose 以 Docker secrets 只读挂载到 `/run/secrets`；Linux 文件缺失或权限过宽会 fail-closed，API 不回显值，设置页显示部署托管且不可网页覆盖。Windows 仍使用 Credential Manager。
 
-如需 VPS 风险事实，使用 `docker-compose.risk-facts.example.yml`，在未提交 `.env` 设置 `QUANT_LAB_VPS_FACT_HOST_PATH`，仅以只读方式挂载到固定路径 `/var/lib/quant-lab/vps-facts`。不得挂载 `/root` 或整库；路径缺失、过期、冲突均保持 fail-closed。
+QQ secrets 是本部署基线的必需项；如暂不启用 QQ，请不要使用该 compose 基线。VPS 风险事实仍可通过 `docker-compose.risk-facts.example.yml` 单独启用：在未提交 `.env` 设置一个 JSONL 文件的 `QUANT_LAB_VPS_FACT_HOST_PATH`，仅以只读方式挂载到固定文件 `/var/lib/quant-lab/vps-facts/vps_macro_risk_points.jsonl` 并设置 `QUANT_LAB_VPS_FACT_PATH`。不得挂载 `/root` 或整库；路径缺失、过期、冲突均保持 fail-closed。
+
+基础 compose 的 secret 文件若不存在会在 `docker compose config`/启动前失败，这是刻意的 fail-closed 行为；先按上文创建并设为 owner-only（Linux `chmod 600`，容器内 Docker secrets 通常为 0444 只读）。
