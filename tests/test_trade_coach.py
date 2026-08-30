@@ -211,6 +211,13 @@ class TradeCoachTests(unittest.TestCase):
         self.assertEqual(advice["recommended_share_range"], [100, 100])
         self.assertEqual(advice["action"], "HOLD")
 
+    def test_down_mode_empty_account_stays_empty(self):
+        advice = self.advice_for_position(0, "DOWN")
+        self.assertEqual(advice["recommended_share_range"], [0, 0])
+        self.assertEqual(advice["action"], "HOLD")
+        self.assertNotEqual(advice["action"], "ADD_IN_STEPS")
+        self.assertNotEqual(advice["action"], "EXIT_MAJOR_RISK")
+
     def test_down_regime_does_not_implicitly_clear(self):
         store = self.make_store()
         start = datetime(2026, 7, 1, tzinfo=CN_TZ)

@@ -2495,7 +2495,8 @@ def build_advice(store: TradeCoachStore, regime: Mapping[str, Any], stock: Mappi
                 trigger = ["区间内等待支撑和反弹确认，不凭单日波动猜底", "低于震荡容量时按100股分批补，高于容量或板块转弱时按100股分批减"]
             invalidation = ["白银与板块重新同步转强", "个股重新强于商品和板块"]
         elif regime.get("code") == "DOWN":
-            low = _round_lot(max(current_shares * 0.33, 100))
+            holding_floor = 100 if current_shares > 0 else 0
+            low = _round_lot(max(current_shares * 0.33, holding_floor))
             high = _round_lot(max(current_shares * 0.67, low))
             share_range = [low, max(low, high)]
             action = "REDUCE_IN_STEPS" if current_shares > high else "HOLD"
