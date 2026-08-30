@@ -9,6 +9,7 @@ data/
 *.jsonl.lock
 runtime/
 secrets/
+launcher-*/
 .env
 .env.*
 !.env.example
