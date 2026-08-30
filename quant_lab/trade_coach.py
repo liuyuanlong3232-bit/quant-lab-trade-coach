@@ -184,6 +184,17 @@ def local_path(value: str | Path) -> Path:
         raise ValueError("Trade Coach storage and evidence paths must be local")
     return candidate.resolve()
 
+def _secret_env(name: str) -> str:
+    """Read a *_FILE secret first, then retain local env compatibility."""
+    file_name = os.environ.get(f"{name}_FILE", "").strip()
+    if file_name:
+        try:
+            path = Path(file_name)
+            if not path.is_file() or path.stat().st_size > 4096 or (os.name != "nt" and path.stat().st_mode & 0o022): return ""
+            return path.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeError): return ""
+    return os.environ.get(name, "").strip()
+
 
 def canonical_hash(value: Any) -> str:
     payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
@@ -1138,7 +1149,7 @@ class DeepSeekMentorProvider(OpenAICompatibleMentorProvider):
     )
 
     def __init__(self, *, api_key: str | None = None, base_url: str | None = None, model: str | None = None, timeout: float | None = None, opener: Callable[..., Any] | None = None):
-        effective_key = api_key if api_key is not None else os.environ.get("DEEPSEEK_API_KEY", "")
+        effective_key = api_key if api_key is not None else _secret_env("DEEPSEEK_API_KEY")
         configured_model = model if model is not None else os.environ.get("DEEPSEEK_MODEL", "")
         # The product contract freezes DeepSeek v4 Flash as its explicit
         # default. Catalog discovery is diagnostics only: a temporary
@@ -1228,7 +1239,7 @@ class MiMoMentorProvider:
     name = "mimo"
 
     def __init__(self, *, api_key: str | None = None, base_url: str | None = None, model: str | None = None, timeout: float | None = None, opener: Callable[..., Any] | None = None):
-        self._api_key = (api_key if api_key is not None else os.environ.get("MIMO_API_KEY", "")).strip()
+        self._api_key = (api_key if api_key is not None else _secret_env("MIMO_API_KEY")).strip()
         self.base_url = (base_url if base_url is not None else (os.environ.get("MIMO_BASE_URL") or os.environ.get("MIMO_OPENAI_BASE_URL") or os.environ.get("MIMO_ANTHROPIC_BASE_URL", ""))).strip().rstrip("/")
         self.model = (model if model is not None else os.environ.get("MIMO_MODEL", "")).strip()
         self.timeout = timeout if timeout is not None else _safe_float_env("TRADE_COACH_AI_TIMEOUT_SECONDS", 18.0, 1.0, 60.0)

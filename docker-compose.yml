@@ -9,10 +9,14 @@ services:
       QQBOT_APP_ID_FILE: /run/secrets/qqbot_app_id
       QQBOT_APP_SECRET_FILE: /run/secrets/qqbot_app_secret
       QQBOT_OPENID_FILE: /run/secrets/qqbot_openid
+      DEEPSEEK_API_KEY_FILE: /run/secrets/deepseek_api_key
+      MIMO_API_KEY_FILE: /run/secrets/mimo_api_key
     secrets:
       - qqbot_app_id
       - qqbot_app_secret
       - qqbot_openid
+      - deepseek_api_key
+      - mimo_api_key
     ports:
       # Deliberately loopback-only. Expose to Tailscale only through a
       # separately reviewed `tailscale serve` rule on the host.
@@ -43,3 +47,7 @@ secrets:
     file: ${QQBOT_APP_SECRET_HOST_FILE:-./.secrets/qqbot_app_secret}
   qqbot_openid:
     file: ${QQBOT_OPENID_HOST_FILE:-./.secrets/qqbot_openid}
+  deepseek_api_key:
+    file: ${DEEPSEEK_API_KEY_HOST_FILE:-./.secrets/deepseek_api_key}
+  mimo_api_key:
+    file: ${MIMO_API_KEY_HOST_FILE:-./.secrets/mimo_api_key}

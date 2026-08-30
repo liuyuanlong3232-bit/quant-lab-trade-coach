@@ -25,7 +25,7 @@
 
 ## QQ secrets 与风险事实
 
-将 `deploy/.env.example` 复制为未提交的 `.env`，并在宿主机创建三个仅 owner 可读（Linux `chmod 600`）的文件：`qqbot_app_id`、`qqbot_app_secret`、`qqbot_openid`。Compose 以 Docker secrets 只读挂载到 `/run/secrets`；Linux 文件缺失或权限过宽会 fail-closed，API 不回显值，设置页显示部署托管且不可网页覆盖。Windows 仍使用 Credential Manager。
+将 `deploy/.env.example` 复制为仓库根目录的未提交 `.env`（compose 的 `env_file: [.env]` 明确指向根目录），并在宿主机创建 QQ/AI secret 文件（Linux `chmod 600`）。Compose 以 Docker secrets 只读挂载到 `/run/secrets`；文件缺失或权限过宽会 fail-closed，API 不回显值，设置页显示部署托管且不可网页覆盖。Windows 仍使用 Credential Manager；AI secret 缺失时服务可启动但 AI 状态明确不可用。
 
 QQ secrets 是本部署基线的必需项；如暂不启用 QQ，请不要使用该 compose 基线。VPS 风险事实仍可通过 `docker-compose.risk-facts.example.yml` 单独启用：在未提交 `.env` 设置一个 JSONL 文件的 `QUANT_LAB_VPS_FACT_HOST_PATH`，仅以只读方式挂载到固定文件 `/var/lib/quant-lab/vps-facts/vps_macro_risk_points.jsonl` 并设置 `QUANT_LAB_VPS_FACT_PATH`。不得挂载 `/root` 或整库；路径缺失、过期、冲突均保持 fail-closed。
 
