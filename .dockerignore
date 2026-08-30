@@ -1,0 +1,12 @@
+.git
+.env
+data
+frontend/node_modules
+frontend/dist
+*.sqlite3*
+*.db*
+*.log
+runtime
+secrets
+__pycache__
+tests

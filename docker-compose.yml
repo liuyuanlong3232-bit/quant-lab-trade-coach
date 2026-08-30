@@ -1,0 +1,29 @@
+services:
+  quant-lab:
+    build: .
+    image: quant-lab-trade-coach:local
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      QUANT_LAB_DATA_DIR: /var/lib/quant-lab
+    ports:
+      # Deliberately loopback-only. Expose to Tailscale only through a
+      # separately reviewed `tailscale serve` rule on the host.
+      - "127.0.0.1:${QUANT_LAB_PORT:-8080}:8080"
+    volumes:
+      - quant_lab_data:/var/lib/quant-lab
+      - quant_lab_logs:/var/log/quant-lab
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/trade-coach/summary', timeout=3)\" "]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+volumes:
+  quant_lab_data:
+  quant_lab_logs:
