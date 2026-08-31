@@ -199,7 +199,7 @@ class DockerSecretCredentialBackend:
     def app_id(self) -> str | None: return self._read_file(self.app_id_file)
     def openid(self) -> str | None: return self._read_file(self.openid_file)
     def secure_store_status(self) -> tuple[str, str]:
-        return ("READY", "DOCKER_SECRETS_READ_ONLY") if self.read() else ("UNAVAILABLE_CURRENT_LOGON_SESSION", "QQBOT_SECRET_FILE_MISSING_OR_INSECURE")
+        return ("READY", "DOCKER_SECRETS_READ_ONLY") if self.read() else ("DEPLOYMENT_SECRET_UNSET", "QQBOT_DEPLOYMENT_SECRET_NOT_CONFIGURED")
     def write(self, secret: str) -> None: raise PermissionError("QQBOT_SECRETS_MANAGED_BY_DEPLOYMENT")
     def delete(self) -> None: raise PermissionError("QQBOT_SECRETS_MANAGED_BY_DEPLOYMENT")
 
@@ -2290,7 +2290,7 @@ def _series_values(rows: Sequence[Mapping[str, Any]], *, adjusted: bool = False)
     values = []
     for row in rows:
         value = _finite(row.get(key))
-        if value is None:
+        if value is None and not adjusted:
             value = _finite(row.get("close"))
         if value is not None and value > 0:
             values.append(value)

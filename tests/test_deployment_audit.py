@@ -20,7 +20,10 @@ class DeploymentAuditTests(unittest.TestCase):
             os.environ["QQBOT_APP_SECRET_FILE"] = "/definitely/missing/qqbot-secret"
             backend = DockerSecretCredentialBackend()
             self.assertIsNone(backend.read())
-            self.assertNotEqual(backend.secure_store_status()[0], "READY")
+            self.assertEqual(
+                backend.secure_store_status(),
+                ("DEPLOYMENT_SECRET_UNSET", "QQBOT_DEPLOYMENT_SECRET_NOT_CONFIGURED"),
+            )
             with self.assertRaises(PermissionError):
                 backend.write("must-not-write")
         finally:

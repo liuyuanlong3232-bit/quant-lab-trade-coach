@@ -31,6 +31,7 @@ from quant_lab.trade_coach import (
     evaluate_stock_state,
     load_vps_facts,
     risk_assessment,
+    _series_values,
 )
 from quant_lab.vps_fact_chain import audit_vps_fact_chain
 
@@ -51,6 +52,14 @@ class FakeHTTPResponse:
 
 
 class TradeCoachTests(unittest.TestCase):
+    def test_adjusted_series_never_falls_back_to_raw_close(self):
+        rows = [
+            {"close": 41.58, "adjusted_close": None},
+            {"close": 42.00, "adjusted_close": 804.092},
+        ]
+        self.assertEqual(_series_values(rows, adjusted=True), [804.092])
+        self.assertEqual(_series_values(rows, adjusted=False), [41.58, 42.0])
+
     def make_store(self):
         self.temp = tempfile.TemporaryDirectory()
         return TradeCoachStore(Path(self.temp.name) / "coach.sqlite3")
