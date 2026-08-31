@@ -7,6 +7,27 @@ from pathlib import Path
 
 
 class DeploymentAuditTests(unittest.TestCase):
+    def test_non_root_nginx_and_loopback_defaults_are_portable(self):
+        root = Path(__file__).resolve().parents[1]
+        compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+        nginx = (root / "deploy" / "nginx.conf").read_text(encoding="utf-8")
+        entrypoint = (root / "deploy" / "entrypoint.sh").read_text(encoding="utf-8")
+        qqbot = (root / "frontend" / "src" / "QQBotSettings.tsx").read_text(encoding="utf-8")
+        self.assertIn("${QUANT_LAB_BIND_HOST:-127.0.0.1}:${QUANT_LAB_PORT:-8080}:8080", compose)
+        self.assertNotRegex(compose, r'ports:\s*\n\s*-\s*"(?:\d{1,3}\.){3}\d{1,3}:')
+        self.assertIn("DEEPSEEK_API_KEY_FILE: /run/secrets/deepseek_api_key", compose)
+        for mount in ("/tmp:size=64m", "/run/nginx:size=1m"):
+            line = next(line for line in compose.splitlines() if mount in line)
+            for option in ("uid=10001", "gid=10001", "mode=0755"):
+                self.assertIn(option, line)
+        self.assertIn("include /etc/nginx/mime.types;", nginx)
+        for name in ("client", "proxy", "fastcgi", "uwsgi", "scgi"):
+            self.assertIn(f"/tmp/nginx/{name}", nginx)
+            self.assertIn(f"/tmp/nginx/{name}", entrypoint)
+        self.assertIn("'DEPLOYMENT_SECRET_UNSET'", qqbot)
+        self.assertIn("VPS 部署密钥未配置", qqbot)
+        self.assertIn("const formDisabled = deploymentManaged || windowsUnavailable", qqbot)
+
     def test_static_deployment_gate_skips_binary_assets(self):
         root = Path(__file__).resolve().parents[1]
         result = subprocess.run([sys.executable, "scripts/audit_deployment.py"], cwd=root, text=True, capture_output=True)

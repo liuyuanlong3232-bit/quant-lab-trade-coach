@@ -15,7 +15,7 @@ for path in ROOT.rglob("*"):
     except (OSError, UnicodeDecodeError):
         continue
 text = "\n".join(parts)
-required = ["127.0.0.1:${QUANT_LAB_PORT:-8080}:8080", "read_only: true", "cap_drop: [ALL]", "healthcheck:", "quant_lab_data:", "quant_lab_logs:", "tailscale", "--project-root \"${QUANT_LAB_DATA_DIR}\"", "/run/nginx:size=1m", "/var/cache/nginx:size=8m", "kill -0 \"$api_pid\"", "kill -0 \"$nginx_pid\"", "proxy_read_timeout 180s", "QQBOT_APP_SECRET_FILE", "DEEPSEEK_API_KEY_FILE", "MIMO_API_KEY_FILE", "DEEPSEEK_API_KEY_HOST_FILE", "MIMO_API_KEY_HOST_FILE", "QUANT_LAB_VPS_FACT_HOST_PATH", "target: /var/lib/quant-lab/vps-facts/vps_macro_risk_points.jsonl", "QUANT_LAB_VPS_FACT_PATH"]
+required = ["${QUANT_LAB_BIND_HOST:-127.0.0.1}:${QUANT_LAB_PORT:-8080}:8080", "read_only: true", "cap_drop: [ALL]", "healthcheck:", "quant_lab_data:", "quant_lab_logs:", "tailscale", "--project-root \"${QUANT_LAB_DATA_DIR}\"", "/run/nginx:size=1m,noexec,nosuid,nodev,uid=10001,gid=10001,mode=0755", "/tmp:size=64m,noexec,nosuid,nodev,uid=10001,gid=10001,mode=0755", "kill -0 \"$api_pid\"", "kill -0 \"$nginx_pid\"", "proxy_read_timeout 180s", "include /etc/nginx/mime.types", "/tmp/nginx/client", "/tmp/nginx/proxy", "/tmp/nginx/fastcgi", "/tmp/nginx/uwsgi", "/tmp/nginx/scgi", "QQBOT_APP_SECRET_FILE", "DEEPSEEK_API_KEY_FILE", "MIMO_API_KEY_FILE", "DEEPSEEK_API_KEY_HOST_FILE", "MIMO_API_KEY_HOST_FILE", "QUANT_LAB_VPS_FACT_HOST_PATH", "target: /var/lib/quant-lab/vps-facts/vps_macro_risk_points.jsonl", "QUANT_LAB_VPS_FACT_PATH", "DEPLOYMENT_SECRET_UNSET", "VPS 部署密钥未配置"]
 for marker in required:
     if marker not in text:
         raise SystemExit(f"DEPLOYMENT_GATE_FAIL missing: {marker}")

@@ -18,16 +18,15 @@ services:
       - deepseek_api_key
       - mimo_api_key
     ports:
-      # Deliberately loopback-only. Expose to Tailscale only through a
-      # separately reviewed `tailscale serve` rule on the host.
-      - "127.0.0.1:${QUANT_LAB_PORT:-8080}:8080"
+      # Defaults to loopback-only. Override the bind host only through a
+      # separately reviewed deployment (for example, a Tailscale host rule).
+      - "${QUANT_LAB_BIND_HOST:-127.0.0.1}:${QUANT_LAB_PORT:-8080}:8080"
     volumes:
       - quant_lab_data:/var/lib/quant-lab
       - quant_lab_logs:/var/log/quant-lab
     tmpfs:
-      - /tmp:size=64m,noexec,nosuid,nodev
-      - /run/nginx:size=1m,noexec,nosuid,nodev
-      - /var/cache/nginx:size=8m,noexec,nosuid,nodev
+      - /tmp:size=64m,noexec,nosuid,nodev,uid=10001,gid=10001,mode=0755
+      - /run/nginx:size=1m,noexec,nosuid,nodev,uid=10001,gid=10001,mode=0755
     read_only: true
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]

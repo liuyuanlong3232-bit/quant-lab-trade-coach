@@ -3,6 +3,7 @@ set -eu
 
 # API remains loopback-only inside the container; nginx is the sole public
 # process and is published by compose only on the host loopback interface.
+mkdir -p /tmp/nginx/client /tmp/nginx/proxy /tmp/nginx/fastcgi /tmp/nginx/uwsgi /tmp/nginx/scgi
 python -m quant_lab.cli trade-coach --serve --host 127.0.0.1 --port 8765 \
   --db "${QUANT_LAB_DATA_DIR}/trade_coach.sqlite3" \
   --project-root "${QUANT_LAB_DATA_DIR}" &
