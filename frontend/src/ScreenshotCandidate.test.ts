@@ -31,6 +31,23 @@ describe('截图候选录入', () => {
     expect(parsed.trade).toMatchObject({ side: 'SELL', quantity: '200', price: '40.690', fees: '5.20', time: '2026-08-27T14:59:45' })
   })
 
+  it('解析真实银河证券持仓页OCR的分字和双行表格', () => {
+    const text = `
+中 国 银河 证 券
+总 资产 浮动 盈亏 当日 参考 盈亏
+32,885.52 +2,314.59 -1,770.00 -5.11%
+总 市 信 可 用 逆 回 购 可 取 转账
+7,726.00 25,158.52 --
+市值 盈亏 持仓 /可 用 世 本 /现价
+兴业 银 锡 2,314.59 200 27.057
+7,726.00 42.772% 200 38.630
+`
+    const parsed = parseBrokerScreenshot(text, 72)
+    expect(parsed.account).toEqual({ shares: '200', avg_cost: '27.057', available_cash: '25158.52', total_assets: '32885.52' })
+    expect(parsed.trade.price).toBe('')
+    expect(parsed.evidence.avg_cost.label).toContain('成本/现价表')
+  })
+
   it('保守解析银河证券双列表头，只取持仓和成本第一列', () => {
     const text = `银河证券\n总资产 34,668.25\n可用资金 9,720.25\n兴业银锡 000426\n持仓/可用 600/600\n成本/现价 34.751/38.630`
     const parsed = parseBrokerScreenshot(text, 86)

@@ -32,13 +32,35 @@ function fieldEvidence(found: { label: string; excerpt: string } | null, confide
   return found ? { confidence: Math.round(Math.max(0, Math.min(99, confidence))), label: found.label, excerpt: found.excerpt } : { confidence: null, label: '未找到明确标签', excerpt: '' }
 }
 
+function galaxyHoldingPage(text: string) {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  const numbers = (line: string) => Array.from(line.matchAll(/[+-]?[0-9][0-9,]*(?:\.[0-9]+)?/g), (match) => cleanNumber(match[0]).replace(/^\+/, ''))
+  const afterHeader = (pattern: RegExp) => {
+    const index = lines.findIndex((line) => pattern.test(line))
+    return index >= 0 && index + 1 < lines.length ? { header: lines[index], line: lines[index + 1], values: numbers(lines[index + 1]) } : null
+  }
+  const assets = afterHeader(/总资产.*浮动盈亏/)
+  const cash = afterHeader(/总市[值信].*可用/)
+  const holdingIndex = lines.findIndex((line) => /持仓.*可用.*(?:成本|世本).*现价/.test(line))
+  const holdingLine = holdingIndex >= 0 ? lines.slice(holdingIndex + 1, holdingIndex + 3).find((line) => /兴业.*银.*锡/.test(line)) : undefined
+  const holdingValues = holdingLine ? numbers(holdingLine) : []
+  const evidence = (value: string | undefined, label: string, excerpt: string) => value ? { value, label, excerpt: excerpt.slice(0, 100) } : null
+  return {
+    total: evidence(assets?.values[0], '银河证券：总资产表（第一列）', assets ? `${assets.header} | ${assets.line}` : ''),
+    cash: evidence(cash?.values[1], '银河证券：总市值/可用表（第二列）', cash ? `${cash.header} | ${cash.line}` : ''),
+    shares: evidence(holdingValues.at(-2), '银河证券：持仓/可用表（持仓列）', holdingLine || ''),
+    cost: evidence(holdingValues.at(-1), '银河证券：成本/现价表（成本列）', holdingLine || ''),
+  }
+}
+
 /** Only explicit broker labels are accepted. Positional guesses are deliberately rejected. */
 export function parseBrokerScreenshot(text: string, confidence = 0): ParsedScreenshot {
-  const normalized = text.replace(/，/g, ',').replace(/：/g, ':').replace(/[ \t]+/g, ' ')
-  const total = labelled(normalized, ['总资产', '资产总值'])
-  const cash = labelled(normalized, ['可用现金', '可用资金', '资金可用'])
-  const shares = labelled(normalized, ['持仓股数', '持仓数量', '股票余额', '股份余额']) || pairedColumn(normalized, '持仓', '可用')
-  const cost = labelled(normalized, ['持仓成本', '成本价', '成本']) || pairedColumn(normalized, '成本', '现价')
+  const normalized = text.replace(/，/g, ',').replace(/：/g, ':').replace(/([\u3400-\u9fff])[ \t]+(?=[\u3400-\u9fff])/g, '$1').replace(/[ \t]+/g, ' ')
+  const galaxy = galaxyHoldingPage(normalized)
+  const total = labelled(normalized, ['总资产', '资产总值']) || galaxy.total
+  const cash = labelled(normalized, ['可用现金', '可用资金', '资金可用']) || galaxy.cash
+  const shares = labelled(normalized, ['持仓股数', '持仓数量', '股票余额', '股份余额']) || pairedColumn(normalized, '持仓', '可用') || galaxy.shares
+  const cost = labelled(normalized, ['持仓成本', '成本价', '成本']) || pairedColumn(normalized, '成本', '现价') || galaxy.cost
   const tradePrice = labelled(normalized, ['实际成交价', '成交价格', '成交均价', '成交价'])
   const tradeQty = labelled(normalized, ['成交数量', '成交股数'])
   const fee = labelled(normalized, ['手续费', '佣金'])
