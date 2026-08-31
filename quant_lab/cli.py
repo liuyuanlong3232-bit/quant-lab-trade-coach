@@ -20,6 +20,7 @@ from .forward_dashboard import serve
 from .forward_probe import CN_TZ, ProbeRunner
 from .forward_store import FoundationLedger, SnapshotStore
 from .trade_coach import TradeCoachService
+from .trade_calendar import TushareTradeCalendarUpdater
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -72,6 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
     coach.add_argument("--serve", action="store_true", help="serve the localhost dashboard and API")
     coach.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "localhost"))
     coach.add_argument("--port", type=int, default=8765)
+    calendar = sub.add_parser("trade-calendar-update", help="safely update the hash-manifested Tushare SSE calendar")
+    calendar.add_argument("--project-root", type=Path, default=Path.cwd())
     return parser
 
 
@@ -131,6 +134,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "dashboard":
         serve(args.db, host=args.host, port=args.port)
         return 0
+    if args.command == "trade-calendar-update":
+        result = TushareTradeCalendarUpdater(args.project_root).update()
+        print(json.dumps(result, ensure_ascii=False, default=str))
+        return 0 if result.get("status") in {"UPDATED", "UNCHANGED"} else 2
     if args.command == "trade-coach":
         service = TradeCoachService(args.db, project_root=args.project_root, bootstrap=True)
         if args.refresh or args.local_only:

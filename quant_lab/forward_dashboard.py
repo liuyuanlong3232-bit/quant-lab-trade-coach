@@ -456,8 +456,10 @@ def make_server(
     # Gateway lifetime follows the dashboard lifetime; credentials are checked
     # by the service and no network task is created when they are absent.
     trade_service.start_qqbot_gateway()
+    trade_service.start_auto_refresh()
     original_close = server.server_close
     def close_with_gateway() -> None:
+        trade_service.stop_auto_refresh()
         trade_service.stop_qqbot_gateway()
         original_close()
     server.server_close = close_with_gateway  # type: ignore[method-assign]

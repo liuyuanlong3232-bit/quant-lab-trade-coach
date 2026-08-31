@@ -315,6 +315,20 @@ export type CoachSummary = {
   trades: Array<Record<string, unknown>>
   vps: VpsFacts
   refresh: Record<string, unknown> | null
+  auto_refresh: {
+    enabled: boolean
+    running: boolean
+    timezone: string
+    points: string[]
+    status: string
+    reason_codes: string[]
+    calendar_source_ref: string | null
+    last_auto_refresh: { event_at?: string; status?: string; reason_codes?: string[]; schedule_key?: string } | null
+    next_planned_at: string | null
+    next_plan_calendar_source_ref: string | null
+    missed_slots_are_backfilled: boolean
+    automatic_trading: boolean
+  }
   capabilities: Record<string, boolean>
 }
 

@@ -3,6 +3,8 @@ allowBuilds:
   # script explicitly allowed in this small local workspace; all other
   # dependency build scripts remain blocked by default.
   esbuild: true
+  # Browser OCR does not need package install scripts; keep them blocked.
+  tesseract.js: false
 
 # pnpm 11 reads install-layout and run-verification settings from the
 # workspace manifest (not from a committed .npmrc).  Keep the generated tree

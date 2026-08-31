@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { formatTimestamp, routeFromHash, statusTone } from './data'
+import { EMPTY_SUMMARY, formatTimestamp, routeFromHash, statusTone } from './data'
 
 describe('Quant-Lab frontend display contracts', () => {
+  it('keeps automatic refresh non-trading and fail-closed by default', () => {
+    expect(EMPTY_SUMMARY.auto_refresh.automatic_trading).toBe(false)
+    expect(EMPTY_SUMMARY.auto_refresh.missed_slots_are_backfilled).toBe(false)
+    expect(EMPTY_SUMMARY.auto_refresh.reason_codes).toContain('A_SHARE_TRADING_CALENDAR_UNAVAILABLE')
+  })
+
   it('keeps route navigation within the complete coach chapters', () => {
     expect(routeFromHash('#/overview')).toBe('overview')
     expect(routeFromHash('#/evidence')).toBe('sources')

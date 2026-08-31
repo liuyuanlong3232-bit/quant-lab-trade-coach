@@ -1,5 +1,9 @@
 # Quant-Lab Personal Trade Coach
 
+自动刷新调度的交易日证据、固定时点、幂等和审计规则见
+[`docs/AUTO_REFRESH_SCHEDULER.md`](docs/AUTO_REFRESH_SCHEDULER.md)。没有可靠的
+Tushare A股交易日历时，调度保持 `UNKNOWN` 并跳过网络刷新。
+
 这是个人使用的脱敏源码基线：本地优先、只读事实、人工确认、禁止自动下单。默认 API 和前端只监听 `127.0.0.1`；未来若迁移到 VPS，应通过 Tailscale 私网访问，并单独审核部署配置。
 
 ## 本地运行
@@ -18,4 +22,3 @@
 ## 未来 VPS 边界
 
 迁移前需单独验证网络探针、数据新鲜度、备份和 Tailscale 访问控制。VPS 只提供经审计的只读事实导出；本工作台不写 VPS、不接券商、不自动下单。
-

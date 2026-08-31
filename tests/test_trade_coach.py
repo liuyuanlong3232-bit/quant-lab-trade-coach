@@ -52,6 +52,14 @@ class FakeHTTPResponse:
 
 
 class TradeCoachTests(unittest.TestCase):
+    def test_scheduled_refresh_skips_when_manual_refresh_lock_is_held(self):
+        service = TradeCoachService(self.make_store().path, project_root=Path.cwd(), bootstrap=False)
+        service._refresh_lock.acquire()
+        try:
+            self.assertEqual(service._scheduled_refresh()["scheduler_status"], "SKIPPED_BUSY")
+        finally:
+            service._refresh_lock.release()
+
     def test_adjusted_series_never_falls_back_to_raw_close(self):
         rows = [
             {"close": 41.58, "adjusted_close": None},

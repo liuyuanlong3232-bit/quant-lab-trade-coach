@@ -41,6 +41,9 @@ from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from .auto_refresh import AutoRefreshScheduler
+from .trade_calendar import TushareTradeCalendarUpdater
+
 try:
     import aiohttp
 except ImportError:  # optional until QQ Bot is configured
@@ -537,6 +540,20 @@ class TradeCoachStore:
                     status TEXT NOT NULL,
                     payload TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS auto_refresh_slots (
+                    schedule_key TEXT PRIMARY KEY,
+                    scheduled_for TEXT NOT NULL,
+                    claimed_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS auto_refresh_audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    schedule_key TEXT NOT NULL,
+                    event_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    reason_codes TEXT NOT NULL,
+                    payload TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_tc_auto_refresh_audit_time ON auto_refresh_audit(event_at, id);
                 CREATE TABLE IF NOT EXISTS ai_runs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     request_hash TEXT NOT NULL UNIQUE,
@@ -931,6 +948,41 @@ class TradeCoachStore:
         result = []
         for row in rows:
             item = dict(row)
+            item["payload"] = json_load(item.get("payload"), {})
+            result.append(item)
+        return result
+
+    def claim_auto_refresh_slot(self, *, schedule_key: str, scheduled_for: datetime, claimed_at: datetime) -> bool:
+        """Claim a slot once; a crash or restart must never replay its network work."""
+        with self._lock, self._session() as connection:
+            before = connection.total_changes
+            connection.execute(
+                "INSERT OR IGNORE INTO auto_refresh_slots(schedule_key,scheduled_for,claimed_at) VALUES(?,?,?)",
+                (schedule_key, iso(scheduled_for), iso(claimed_at)),
+            )
+            claimed = connection.total_changes > before
+            if claimed:
+                connection.execute(
+                    "INSERT INTO auto_refresh_audit(schedule_key,event_at,status,reason_codes,payload) VALUES(?,?,?,?,?)",
+                    (schedule_key, iso(claimed_at), "CLAIMED", "[]", json.dumps({"automatic_trading": False, "network_backfill": False}, ensure_ascii=False, sort_keys=True)),
+                )
+            return claimed
+
+    def append_auto_refresh_audit(self, *, schedule_key: str, status: str, reason_codes: Sequence[str], payload: Mapping[str, Any], event_at: datetime) -> int:
+        with self._lock, self._session() as connection:
+            connection.execute(
+                "INSERT INTO auto_refresh_audit(schedule_key,event_at,status,reason_codes,payload) VALUES(?,?,?,?,?)",
+                (schedule_key, iso(event_at), status, json.dumps(list(reason_codes), ensure_ascii=False), json.dumps(dict(payload), ensure_ascii=False, sort_keys=True)),
+            )
+            return int(connection.execute("SELECT last_insert_rowid()").fetchone()[0])
+
+    def auto_refresh_audit(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self._session() as connection:
+            rows = connection.execute("SELECT * FROM auto_refresh_audit ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["reason_codes"] = json_load(item.get("reason_codes"), [])
             item["payload"] = json_load(item.get("payload"), {})
             result.append(item)
         return result
@@ -2723,7 +2775,10 @@ class TradeCoachService:
         self.project_root = local_path(project_root or Path(db_path).resolve().parents[1])
         self.credential_backend = credential_backend or (DockerSecretCredentialBackend() if os.environ.get("QQBOT_APP_SECRET_FILE") else WindowsCredentialBackend())
         self._qqbot_binding_lock = threading.Lock()
+        self._refresh_lock = threading.Lock()
         self.collector = RealMarketCollector(self.store, project_root=self.project_root)
+        self.trade_calendar_updater = TushareTradeCalendarUpdater(self.project_root)
+        self.auto_refresh = AutoRefreshScheduler(self.store, self.project_root, self._scheduled_refresh, calendar_update=self.trade_calendar_updater.update)
         self.vps_path = vps_path
         # Unit/fixture services created with ``bootstrap=False`` must never
         # inherit live credentials from the shell.  The real application uses
@@ -2961,6 +3016,7 @@ class TradeCoachService:
             "trades": self.store.trades(30),
             "vps": vps,
             "refresh": latest_refresh[0] if latest_refresh else None,
+            "auto_refresh": self.auto_refresh.status(),
             "capabilities": {"manual_account_confirmation": True, "manual_trade_record": True, "real_market_refresh": True, "deterministic_rule_engine": True, "optional_ai_explanation": bool(self.ai_status().get("configured")), "notification_adapter": True, "broker_connection": False, "automatic_order": False, "fake_account": False, "random_market_data": False},
         }
 
@@ -2998,9 +3054,27 @@ class TradeCoachService:
         return record
 
     def refresh(self, *, include_live: bool = True) -> dict[str, Any]:
-        result = self.collector.refresh(include_live=include_live)
-        result["analysis"] = self.rebuild_analysis()
-        return result
+        with self._refresh_lock:
+            result = self.collector.refresh(include_live=include_live)
+            result["analysis"] = self.rebuild_analysis()
+            return result
+
+    def _scheduled_refresh(self) -> dict[str, Any]:
+        if not self._refresh_lock.acquire(blocking=False):
+            return {"scheduler_status": "SKIPPED_BUSY", "automatic_trading": False}
+        try:
+            result = self.collector.refresh(include_live=True)
+            result["analysis"] = self.rebuild_analysis()
+            result["automatic_trading"] = False
+            return result
+        finally:
+            self._refresh_lock.release()
+
+    def start_auto_refresh(self) -> None:
+        self.auto_refresh.start()
+
+    def stop_auto_refresh(self) -> None:
+        self.auto_refresh.stop()
 
     def _qqbot_status(self) -> dict[str, Any]:
         settings_path, _ = _qqbot_paths(self.project_root)
